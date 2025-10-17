@@ -25,7 +25,7 @@ const App = () => (
         <DataProvider>
           <Toaster />
           <Sonner />
-          <BrowserRouter>
+          <BrowserRouter basename="/10-16_SME-accounting-inventory-system">
             <Layout>
               <Routes>
                 <Route path="/" element={<Dashboard />} />

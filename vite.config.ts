@@ -5,6 +5,7 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  base: '/10-16_SME-accounting-inventory-system/',
   server: {
     host: "::",
     port: 8080,
