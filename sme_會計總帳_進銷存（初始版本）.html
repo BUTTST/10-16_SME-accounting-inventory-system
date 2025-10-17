@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SME 會計 + 進銷存（Web MVP）</title>
+  <style>
+    :root{--bg:#0f172a;--panel:#111827;--muted:#1f2937;--text:#e5e7eb;--sub:#9ca3af;--accent:#22d3ee;--ok:#22c55e;--warn:#fbbf24;--bad:#ef4444;--card:#0b1220}
+    *{box-sizing:border-box} html,body{height:100%}
+    body{margin:0;background:linear-gradient(180deg,#0b1220,#0f172a);color:var(--text);font:14px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    a{color:var(--accent);text-decoration:none}
+    .wrap{max-width:1200px;margin:24px auto;padding:0 16px}
+    header{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:16px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{width:36px;height:36px;border-radius:12px;background:radial-gradient(circle at 30% 30%,#22d3ee,transparent 60%),radial-gradient(circle at 70% 70%,#60a5fa,transparent 60%),var(--muted);box-shadow:0 0 0 1px #334155, 0 6px 16px #000}
+    h1{font-size:18px;margin:0}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap}
+    .tab{padding:8px 12px;border:1px solid #334155;border-radius:10px;background:rgba(255,255,255,0.02);cursor:pointer}
+    .tab.active{background:linear-gradient(180deg,#1f2937,#0b1220);color:#fff;box-shadow:inset 0 0 0 1px #3b82f6}
+    .grid{display:grid;gap:12px}
+    @media (min-width:900px){.grid.cols-2{grid-template-columns:1fr 1fr}.grid.cols-3{grid-template-columns:repeat(3,1fr)}}
+    .card{background:linear-gradient(180deg,#0c1324,#0b0f1a);border:1px solid #293147;border-radius:16px;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+    .card h3{margin:0 0 6px 0;font-size:15px;color:#e2e8f0}
+    .card .hd{padding:14px 16px;border-bottom:1px solid #243044}
+    .card .bd{padding:14px 16px}
+    .muted{color:var(--sub)}
+    .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;border:1px solid #324055;background:#111827}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    input,select,textarea{background:#0b1220;border:1px solid #2a3550;border-radius:10px;color:#e5e7eb;padding:8px 10px;outline:none}
+    input:focus,select:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(96,165,250,.2)}
+    button{background:linear-gradient(180deg,#1f2a44,#0c1222);border:1px solid #324055;border-radius:10px;color:#e5e7eb;padding:8px 12px;cursor:pointer}
+    button.primary{background:linear-gradient(180deg,#2563eb,#1e40af);border-color:#1e3a8a}
+    button.ok{background:linear-gradient(180deg,#16a34a,#166534);border-color:#14532d}
+    button.warn{background:linear-gradient(180deg,#f59e0b,#b45309);border-color:#92400e;color:#111827}
+    button.bad{background:linear-gradient(180deg,#ef4444,#7f1d1d);border-color:#7f1d1d}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px 10px;border-bottom:1px dashed #263147}
+    th{color:#cbd5e1;text-align:left;font-weight:600}
+    tfoot td{border-top:1px solid #334155;font-weight:700}
+    .right{text-align:right}
+    .center{text-align:center}
+    .kpi{font-size:22px;font-weight:800}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, monospace}
+    .danger{color:#fecaca}
+    .success{color:#bbf7d0}
+    .soft{opacity:.85}
+    .stack{display:flex;flex-direction:column;gap:8px}
+    .help{font-size:12px;color:#9ca3af}
+    .tag{display:inline-block;font-size:12px;padding:2px 8px;border:1px solid #324055;border-radius:999px}
+    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .hr{height:1px;background:#223047;margin:10px 0}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <h1>SME 會計 + 進銷存（Web 版）</h1>
+          <div class="help">單機瀏覽器即可使用．資料存於 LocalStorage．支援基本進銷存、平均成本、傳票與報表</div>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button id="btnExport">匯出 JSON</button>
+        <label class="pill"><input type="file" id="fileImport" hidden> <span>匯入</span></label>
+        <button class="warn" id="btnReset">重設資料</button>
+      </div>
+    </header>
+
+    <nav class="tabs" id="tabs"></nav>
+
+    <section id="view"></section>
+  </div>
+
+<script>
+(function(){
+  // ---------- Utilities ----------
+  const $ = (sel, el=document) => el.querySelector(sel);
+  const $$ = (sel, el=document) => Array.from(el.querySelectorAll(sel));
+  const uid = () => Math.random().toString(36).slice(2,9);
+  const today = () => new Date().toISOString().slice(0,10);
+  const fmt = (n, cur=state.settings.currency) => `${cur}${Number(n||0).toLocaleString('zh-TW',{minimumFractionDigits:2, maximumFractionDigits:2})}`;
+  const sum = (arr, fn = x=>x) => arr.reduce((a,b)=>a+fn(b),0);
+  const deepClone = o => JSON.parse(JSON.stringify(o));
+
+  // ---------- Data Model ----------
+  const DEFAULT = {
+    settings: { orgName: '範例公司', currency: 'NT$', taxRate: 0.05 },
+    accounts: [
+      {code:'1001', name:'現金/銀行', type:'Asset'},
+      {code:'1100', name:'應收帳款', type:'Asset'},
+      {code:'1400', name:'存貨', type:'Asset'},
+      {code:'2100', name:'應付帳款', type:'Liability'},
+      {code:'2300', name:'營業稅應付（銷項-進項）', type:'Liability'},
+      {code:'3000', name:'業主權益', type:'Equity'},
+      {code:'4000', name:'銷貨收入', type:'Revenue'},
+      {code:'5000', name:'銷貨成本', type:'Expense'}
+    ],
+    items: [
+      {id:uid(), sku:'A100', name:'範例商品 A', qty:20, avgCost:120, category:'一般'},
+      {id:uid(), sku:'B200', name:'範例商品 B', qty:10, avgCost:300, category:'一般'}
+    ],
+    partners: { customers:[{id:uid(), name:'台灣好客戶'}], vendors:[{id:uid(), name:'優質供應商'}] },
+    txns: [], // {id,type:'sale'|'purchase',date,docNo,partnerId,pm:'cash'|'credit',lines:[{itemId,qty,price,taxRate}], note}
+    journals: [] // {id,date,docNo,desc,lines:[{account,debit,credit}]}
+  };
+
+  let state = load() || DEFAULT;
+
+  function persist(){ localStorage.setItem('sme-app-v1', JSON.stringify(state)); }
+  function load(){ try{ return JSON.parse(localStorage.getItem('sme-app-v1')); }catch(e){ return null; } }
+
+  // ---------- Nav ----------
+  const PAGES = [
+    {id:'dash', name:'總覽'},
+    {id:'items', name:'商品/存貨'},
+    {id:'sales', name:'銷售 (開立發票)'},
+    {id:'purchases', name:'進貨 (採購)'},
+    {id:'partners', name:'客戶/供應商'},
+    {id:'accounting', name:'傳票 & 科目'},
+    {id:'reports', name:'報表'},
+    {id:'settings', name:'設定'}
+  ];
+  let currentPage = 'dash';
+
+  function renderTabs(){
+    const nav = $('#tabs');
+    nav.innerHTML = PAGES.map(p=>`<button class="tab ${currentPage===p.id?'active':''}" data-tab="${p.id}">${p.name}</button>`).join('');
+    $$('#tabs .tab').forEach(btn=>btn.onclick = ()=>{ currentPage = btn.dataset.tab; render(); });
+  }
+
+  // ---------- Inventory Helpers ----------
+  function getItem(id){ return state.items.find(x=>x.id===id); }
+  function adjustAvgCostOnPurchase(item, qty, unitCost){
+    const oldQty = item.qty; const oldVal = oldQty * item.avgCost;
+    const addVal = qty * unitCost;
+    const newQty = oldQty + qty;
+    item.avgCost = newQty>0 ? (oldVal + addVal)/newQty : item.avgCost;
+    item.qty = newQty;
+  }
+  function reduceOnSale(item, qty){
+    if(qty>item.qty) throw new Error(`庫存不足：${item.name} 目前數量 ${item.qty}`);
+    item.qty -= qty;
+  }
+
+  // ---------- Posting ----------
+  function postPurchase({date, docNo, vendorId, pm, lines, note}){
+    const subtotal = sum(lines, l=> l.qty*l.price);
+    const tax = subtotal * state.settings.taxRate;
+    const total = subtotal + tax;
+
+    // Update inventory average cost (price excludes tax)
+    lines.forEach(l=>{
+      const item = getItem(l.itemId); if(!item) throw new Error('找不到商品');
+      adjustAvgCostOnPurchase(item, Number(l.qty), Number(l.price));
+    });
+
+    const j = { id:uid(), date, docNo, desc:`採購 ${docNo}` , lines:[
+      {account:'1400', debit:round2(subtotal), credit:0},
+      {account:'2300', debit:round2(tax), credit:0},
+      pm==='cash' ? {account:'1001', debit:0, credit:round2(total)} : {account:'2100', debit:0, credit:round2(total)}
+    ]};
+
+    state.journals.push(j);
+    state.txns.push({id:uid(), type:'purchase', date, docNo, partnerId:vendorId, pm, lines, note});
+    persist();
+  }
+
+  function postSale({date, docNo, customerId, pm, lines, note}){
+    // Validate stock first
+    lines.forEach(l=>{ const item=getItem(l.itemId); if(!item) throw new Error('找不到商品'); if(l.qty>item.qty) throw new Error(`庫存不足：${item.name}`); });
+
+    const subtotal = sum(lines, l=> l.qty*l.price);
+    const tax = subtotal * state.settings.taxRate;
+    const total = subtotal + tax;
+
+    // COGS based on avgCost
+    const cogs = sum(lines, l=> getItem(l.itemId).avgCost * l.qty);
+
+    // Reduce stock
+    lines.forEach(l=>{ const item=getItem(l.itemId); reduceOnSale(item, Number(l.qty)); });
+
+    const j = { id:uid(), date, docNo, desc:`銷售 ${docNo}` , lines:[
+      pm==='cash' ? {account:'1001', debit:round2(total), credit:0} : {account:'1100', debit:round2(total), credit:0},
+      {account:'4000', debit:0, credit:round2(subtotal)},
+      {account:'2300', debit:0, credit:round2(tax)},
+      {account:'5000', debit:round2(cogs), credit:0},
+      {account:'1400', debit:0, credit:round2(cogs)}
+    ]};
+
+    state.journals.push(j);
+    state.txns.push({id:uid(), type:'sale', date, docNo, partnerId:customerId, pm, lines, note});
+    persist();
+  }
+
+  function round2(n){ return Math.round((Number(n)||0)*100)/100; }
+
+  // ---------- Reporting ----------
+  function ledgerBalances(){
+    const map = new Map(state.accounts.map(a=>[a.code,{...a, debit:0, credit:0}]));
+    state.journals.forEach(j=> j.lines.forEach(l=>{
+      const acc = map.get(l.account); if(acc){ acc.debit += l.debit; acc.credit += l.credit; }
+    }));
+    const rows = Array.from(map.values()).map(a=>{
+      const isDR = ['Asset','Expense'].includes(a.type);
+      const bal = isDR ? (a.debit - a.credit) : (a.credit - a.debit);
+      return {...a, balance: round2(bal)};
+    });
+    return rows;
+  }
+
+  function trialBalance(){
+    const rows = ledgerBalances();
+    const left = sum(rows.filter(r=>['Asset','Expense'].includes(r.type)), r=>r.balance);
+    const right = sum(rows.filter(r=>['Liability','Equity','Revenue'].includes(r.type)), r=>r.balance);
+    return {rows,left,right};
+  }
+
+  function pnl(){
+    const rows = ledgerBalances();
+    const rev = sum(rows.filter(r=>r.type==='Revenue'), r=>r.balance);
+    const exp = sum(rows.filter(r=>r.type==='Expense'), r=>r.balance);
+    return {revenue:rev, expense:exp, profit: round2(rev - exp)};
+  }
+
+  function balanceSheet(){
+    const rows = ledgerBalances();
+    const assets = rows.filter(r=>r.type==='Asset');
+    const liab = rows.filter(r=>r.type==='Liability');
+    const equity = rows.filter(r=>r.type==='Equity');
+    const {profit} = pnl();
+    const totalAssets = sum(assets, r=>r.balance);
+    const totalLiab = sum(liab, r=>r.balance);
+    const equitySum = sum(equity, r=>r.balance) + profit; // 將累積損益視為權益
+    return {assets, liab, equity, profit, totalAssets, totalLiab, equitySum};
+  }
+
+  function monthRange(date){
+    const d = new Date(date||today());
+    const s = new Date(d.getFullYear(), d.getMonth(), 1);
+    const e = new Date(d.getFullYear(), d.getMonth()+1, 0);
+    return [s.toISOString().slice(0,10), e.toISOString().slice(0,10)];
+  }
+
+  function kpis(){
+    const [start,end] = monthRange();
+    const inMonth = state.txns.filter(t=> t.date>=start && t.date<=end);
+    const sales = inMonth.filter(t=>t.type==='sale');
+    const purchases = inMonth.filter(t=>t.type==='purchase');
+    const salesAmt = sum(sales, s=> sum(s.lines,l=>l.qty*l.price) * (1+state.settings.taxRate));
+    const cogsAmt = sum(sales, s=> sum(s.lines, l=> getItem(l.itemId).avgCost * l.qty));
+    const gm = salesAmt>0 ? (1 - (cogsAmt / salesAmt)) : 0;
+    const invValue = sum(state.items, it=> it.qty*it.avgCost);
+    return {salesAmt:round2(salesAmt), gm:round2(gm*100), invValue:round2(invValue), purchaseCount:purchases.length};
+  }
+
+  // ---------- Renderers ----------
+  function render(){
+    renderTabs();
+    const el = $('#view');
+    const pages = {
+      dash: renderDash,
+      items: renderItems,
+      sales: renderSales,
+      purchases: renderPurchases,
+      partners: renderPartners,
+      accounting: renderAccounting,
+      reports: renderReports,
+      settings: renderSettings
+    };
+    (pages[currentPage]||renderDash)(el);
+  }
+
+  function renderDash(root){
+    const k = kpis();
+    root.innerHTML = `
+      <div class="grid cols-3">
+        <div class="card"><div class="hd"><h3>本月銷售(含稅)</h3></div><div class="bd"><div class="kpi">${fmt(k.salesAmt)}</div><div class="soft">含稅 5%（可於設定修改）</div></div></div>
+        <div class="card"><div class="hd"><h3>庫存總價值</h3></div><div class="bd"><div class="kpi">${fmt(k.invValue)}</div><div class="soft">平均成本法</div></div></div>
+        <div class="card"><div class="hd"><h3>毛利率 (估)</h3></div><div class="bd"><div class="kpi">${k.gm}%</div><div class="soft">依平均成本估算</div></div></div>
+      </div>
+      <div class="grid cols-2" style="margin-top:12px">
+        <div class="card"><div class="hd"><h3>快速動作</h3></div>
+        <div class="bd row">
+          <button class="primary" id="goSale">+ 開立銷貨</button>
+          <button id="goBuy">+ 建立採購</button>
+          <button id="goItem">+ 新增商品</button>
+        </div></div>
+        <div class="card"><div class="hd"><h3>最近交易</h3></div><div class="bd" id="recent"></div></div>
+      </div>`;
+    $('#goSale').onclick=()=>{currentPage='sales';render();};
+    $('#goBuy').onclick=()=>{currentPage='purchases';render();};
+    $('#goItem').onclick=()=>{currentPage='items';render();};
+
+    const last = state.txns.slice(-8).reverse();
+    $('#recent').innerHTML = `
+      <table><thead><tr><th>日期</th><th>單號</th><th>類型</th><th>對象</th><th class="right">金額(含稅)</th></tr></thead>
+      <tbody>
+      ${last.map(t=>{
+        const partner = t.type==='sale'? state.partners.customers.find(c=>c.id===t.partnerId): state.partners.vendors.find(v=>v.id===t.partnerId);
+        const amt = sum(t.lines, l=>l.qty*l.price)*(1+state.settings.taxRate);
+        return `<tr><td>${t.date}</td><td class="mono">${t.docNo}</td><td>${t.type==='sale'?'銷售':'採購'}</td><td>${partner?partner.name:'-'}</td><td class="right">${fmt(amt)}</td></tr>`
+      }).join('')}
+      </tbody></table>`;
+  }
+
+  function renderItems(root){
+    const rows = state.items;
+    root.innerHTML = `
+      <div class="card"><div class="hd"><h3>商品清單</h3></div>
+      <div class="bd">
+        <div class="toolbar">
+          <input id="itSearch" placeholder="搜尋名稱/料號…" />
+          <button class="primary" id="addItem">+ 新增商品</button>
+        </div>
+        <div class="hr"></div>
+        <table><thead><tr><th>料號</th><th>名稱</th><th class="right">數量</th><th class="right">平均成本</th><th class="right">小計</th><th>操作</th></tr></thead>
+        <tbody id="itBody"></tbody>
+        <tfoot><tr><td colspan="4" class="right">合計</td><td class="right mono" id="invSum"></td><td></td></tr></tfoot>
+        </table>
+        <div class="help">平均成本會在「採購入庫」時自動更新。</div>
+      </div></div>`;
+    const body = $('#itBody');
+    function paint(filter=''){
+      const list = rows.filter(r=> !filter || r.name.includes(filter) || r.sku.includes(filter));
+      body.innerHTML = list.map(r=>`<tr>
+        <td class="mono">${r.sku}</td>
+        <td>${r.name}</td>
+        <td class="right">${r.qty}</td>
+        <td class="right">${fmt(r.avgCost)}</td>
+        <td class="right">${fmt(r.qty*r.avgCost)}</td>
+        <td><button data-id="${r.id}">編輯</button></td>
+      </tr>`).join('');
+      $('#invSum').textContent = fmt(sum(rows, x=>x.qty*x.avgCost));
+      body.querySelectorAll('button').forEach(b=> b.onclick = ()=> editItem(b.dataset.id));
+    }
+    paint();
+    $('#itSearch').oninput = (e)=> paint(e.target.value.trim());
+    $('#addItem').onclick = ()=> editItem();
+  }
+
+  function editItem(id){
+    const isNew = !id;
+    const data = isNew? {id:uid(), sku:'', name:'', qty:0, avgCost:0, category:''} : deepClone(getItem(id));
+    const dlg = document.createElement('div');
+    dlg.innerHTML = `
+      <div class="card" style="max-width:700px;margin:0 auto">
+        <div class="hd"><h3>${isNew?'新增':'編輯'}商品</h3></div>
+        <div class="bd stack">
+          <div class="row"><label>料號<br><input id="sku" value="${data.sku}"></label><label>名稱<br><input id="name" value="${data.name}"></label><label>類別<br><input id="cat" value="${data.category}"></label></div>
+          <div class="row"><label>數量<br><input id="qty" type="number" step="1" value="${data.qty}"></label><label>平均成本<br><input id="cost" type="number" step="0.01" value="${data.avgCost}"></label></div>
+          <div class="row"><button class="ok" id="save">保存</button> <button id="cancel">取消</button> ${!isNew?'<button class="bad" id="del">刪除</button>':''}</div>
+        </div>
+      </div>`;
+    const overlay = showModal(dlg);
+    $('#save', dlg).onclick=()=>{
+      data.sku = $('#sku', dlg).value.trim();
+      data.name = $('#name', dlg).value.trim();
+      data.category = $('#cat', dlg).value.trim();
+      data.qty = Number($('#qty', dlg).value||0);
+      data.avgCost = Number($('#cost', dlg).value||0);
+      if(isNew) state.items.push(data); else Object.assign(getItem(id), data);
+      persist(); overlay.remove(); render();
+    };
+    $('#cancel', dlg).onclick=()=> overlay.remove();
+    const delBtn = $('#del', dlg); if(delBtn) delBtn.onclick=()=>{ state.items = state.items.filter(x=>x.id!==id); persist(); overlay.remove(); render(); };
+  }
+
+  function renderSales(root){
+    root.innerHTML = txnFormTemplate('sale');
+    bindTxnForm('sale');
+  }
+  function renderPurchases(root){
+    root.innerHTML = txnFormTemplate('purchase');
+    bindTxnForm('purchase');
+  }
+
+  function txnFormTemplate(type){
+    const isSale = type==='sale';
+    const partners = isSale? state.partners.customers : state.partners.vendors;
+    const title = isSale? '銷售開立' : '採購建立';
+    const docNo = (isSale?'S':'P') + new Date().toISOString().slice(2,10).replace(/-/g,'') + '-' + String(state.txns.length+1).padStart(3,'0');
+    return `
+      <div class="card"><div class="hd"><h3>${title}</h3></div>
+      <div class="bd stack">
+        <div class="row">
+          <label>日期<br><input id="txDate" type="date" value="${today()}"></label>
+          <label>單號<br><input id="txDoc" value="${docNo}"></label>
+          <label>${isSale?'客戶':'供應商'}<br>
+            <select id="txPartner">${partners.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
+          </label>
+          <label>付款方式<br>
+            <select id="txPM"><option value="cash">現金</option><option value="credit">賒帳</option></select>
+          </label>
+        </div>
+        <div class="hr"></div>
+        <table id="lineTable"><thead><tr><th>商品</th><th class="right">數量</th><th class="right">單價(未稅)</th><th class="right">小計</th><th></th></tr></thead>
+          <tbody></tbody>
+          <tfoot><tr><td colspan="5"><button id="addLine">+ 新增品項</button></td></tr></tfoot>
+        </table>
+        <div class="row" style="justify-content:flex-end">
+          <div class="stack" style="min-width:260px">
+            <div class="row"><div class="muted">未稅小計</div><div class="right mono" id="sumSub">NT$0.00</div></div>
+            <div class="row"><div class="muted">營業稅 (${state.settings.taxRate*100}%)</div><div class="right mono" id="sumTax">NT$0.00</div></div>
+            <div class="row"><div class="muted">含稅金額</div><div class="right mono" id="sumTot">NT$0.00</div></div>
+          </div>
+        </div>
+        <textarea id="txNote" rows="2" placeholder="備註（選填）"></textarea>
+        <div class="row"><button class="ok" id="btnPost">登錄並產生傳票</button><button id="btnCancel">清空</button></div>
+      </div></div>`;
+  }
+
+  function bindTxnForm(type){
+    const tbody = $('#lineTable tbody');
+    function addRow(){
+      const row = document.createElement('tr');
+      row.innerHTML = `<td><select class="lnItem">${state.items.map(i=>`<option value="${i.id}">${i.sku}｜${i.name}</option>`).join('')}</select></td>
+        <td class="right"><input class="lnQty" type="number" min="1" step="1" value="1"></td>
+        <td class="right"><input class="lnPrice" type="number" step="0.01" value="${type==='sale'? (getItem(state.items[0].id).avgCost*1.3).toFixed(2): getItem(state.items[0].id).avgCost.toFixed(2)}"></td>
+        <td class="right mono lnSub">-</td>
+        <td class="center"><button class="bad delLine">刪</button></td>`;
+      tbody.appendChild(row);
+      bindRow(row);
+      recalc();
+    }
+    function bindRow(tr){
+      const qty = $('.lnQty', tr), price=$('.lnPrice', tr);
+      [qty, price, $('.lnItem', tr)].forEach(el=> el.oninput = recalc);
+      $('.delLine', tr).onclick = ()=>{ tr.remove(); recalc(); };
+    }
+    function recalc(){
+      const rows = Array.from(tbody.children);
+      let sub=0; rows.forEach(tr=>{
+        const itemId = $('.lnItem', tr).value; const it = getItem(itemId);
+        const qty = Number($('.lnQty', tr).value||0);
+        const price = Number($('.lnPrice', tr).value||0);
+        const s = qty*price; sub+=s; $('.lnSub', tr).textContent = fmt(s);
+        if(type==='sale' && qty>it.qty){ $('.lnSub', tr).classList.add('danger'); $('.lnSub', tr).title=`庫存不足 (現有 ${it.qty})`; } else { $('.lnSub', tr).classList.remove('danger'); $('.lnSub', tr).title=''; }
+      });
+      const tax = sub*state.settings.taxRate; const tot=sub+tax;
+      $('#sumSub').textContent=fmt(sub); $('#sumTax').textContent=fmt(tax); $('#sumTot').textContent=fmt(tot);
+      return {sub,tax,tot};
+    }
+    $('#addLine').onclick = addRow; addRow();
+    $('#btnCancel').onclick = ()=>{ tbody.innerHTML=''; addRow(); recalc(); };
+    $('#btnPost').onclick = ()=>{
+      const lines = Array.from(tbody.children).map(tr=>({
+        itemId: $('.lnItem', tr).value,
+        qty: Number($('.lnQty', tr).value),
+        price: Number($('.lnPrice', tr).value)
+      }));
+      if(!lines.length) return alert('至少需要一個品項');
+      try{
+        const payload = {
+          date: $('#txDate').value,
+          docNo: $('#txDoc').value.trim()|| (type==='sale'?'S':'P')+uid().toUpperCase(),
+          pm: $('#txPM').value,
+          lines,
+          note: $('#txNote').value.trim()
+        };
+        if(type==='sale'){
+          payload.customerId = $('#txPartner').value; postSale(payload);
+        } else {
+          payload.vendorId = $('#txPartner').value; postPurchase(payload);
+        }
+        alert('已登錄並產生傳票');
+        currentPage='dash'; render();
+      }catch(e){ alert(e.message); }
+    };
+  }
+
+  function renderPartners(root){
+    const cs = state.partners.customers, vs = state.partners.vendors;
+    root.innerHTML = `
+      <div class="grid cols-2">
+        <div class="card"><div class="hd"><h3>客戶</h3></div><div class="bd" id="cust"></div></div>
+        <div class="card"><div class="hd"><h3>供應商</h3></div><div class="bd" id="vend"></div></div>
+      </div>`;
+    function paint(list, host){
+      host.innerHTML = `
+        <div class="toolbar"><input placeholder="名稱" id="nm"><button id="add">新增</button></div>
+        <div class="hr"></div>
+        <table><thead><tr><th>名稱</th><th>操作</th></tr></thead><tbody>
+        ${list.map(p=>`<tr><td>${p.name}</td><td><button data-id="${p.id}">刪除</button></td></tr>`).join('')}
+        </tbody></table>`;
+      $('#add', host).onclick=()=>{ const v=$('#nm', host).value.trim(); if(!v) return; list.push({id:uid(), name:v}); persist(); paint(list, host); };
+      host.querySelectorAll('tbody button').forEach(b=> b.onclick=()=>{ const i=list.findIndex(x=>x.id===b.dataset.id); if(i>-1){ list.splice(i,1); persist(); paint(list, host);} });
+    }
+    paint(cs, $('#cust'));
+    paint(vs, $('#vend'));
+  }
+
+  function renderAccounting(root){
+    root.innerHTML = `
+      <div class="grid cols-2">
+        <div class="card"><div class="hd"><h3>傳票</h3></div><div class="bd" id="jWrap"></div></div>
+        <div class="card"><div class="hd"><h3>會計科目</h3></div><div class="bd" id="aWrap"></div></div>
+      </div>`;
+    const jw = $('#jWrap');
+    jw.innerHTML = `<table><thead><tr><th>日期</th><th>單號/摘要</th><th>科目</th><th class="right">借方</th><th class="right">貸方</th></tr></thead><tbody>
+      ${state.journals.slice().reverse().map(j=> j.lines.map((l,i)=>`<tr>
+        ${i===0?`<td rowspan="${j.lines.length}">${j.date}</td><td rowspan="${j.lines.length}"><div class="mono">${j.docNo}</div><div class="soft">${j.desc}</div></td>`:''}
+        <td>${accName(l.account)}</td>
+        <td class="right">${l.debit?fmt(l.debit):''}</td>
+        <td class="right">${l.credit?fmt(l.credit):''}</td>
+      </tr>`).join('')).join('')}
+    </tbody></table>`;
+
+    const aw = $('#aWrap');
+    aw.innerHTML = `<table><thead><tr><th>代碼</th><th>名稱</th><th>類型</th><th class="right">餘額</th></tr></thead><tbody>
+      ${ledgerBalances().map(a=>`<tr><td class="mono">${a.code}</td><td>${a.name}</td><td>${a.type}</td><td class="right">${fmt(a.balance)}</td></tr>`).join('')}
+    </tbody></table>`;
+  }
+
+  function accName(code){ const a = state.accounts.find(x=>x.code===code); return a?`${a.code} ${a.name}`:code; }
+
+  function renderReports(root){
+    const tb = trialBalance(); const pl = pnl(); const bs = balanceSheet();
+    root.innerHTML = `
+      <div class="grid cols-3">
+        <div class="card"><div class="hd"><h3>試算表</h3></div><div class="bd" id="tb"></div></div>
+        <div class="card"><div class="hd"><h3>損益表</h3></div><div class="bd" id="pl"></div></div>
+        <div class="card"><div class="hd"><h3>資產負債表</h3></div><div class="bd" id="bs"></div></div>
+      </div>
+      <div class="card" style="margin-top:12px"><div class="hd"><h3>庫存估價</h3></div><div class="bd" id="iv"></div></div>`;
+
+    $('#tb').innerHTML = `<table><thead><tr><th>科目</th><th class="right">金額</th></tr></thead><tbody>
+      ${ledgerBalances().map(r=>`<tr><td>${r.code} ${r.name}</td><td class="right">${fmt(r.balance)}</td></tr>`).join('')}
+      </tbody><tfoot><tr><td class="right">借方類合計 (資產+費用)</td><td class="right">${fmt(tb.left)}</td></tr>
+      <tr><td class="right">貸方類合計 (負債+權益+收入)</td><td class="right">${fmt(tb.right)}</td></tr></tfoot></table>`;
+
+    $('#pl').innerHTML = `<div class="stack">
+      <div class="row"><div>營業收入</div><div class="right mono" style="margin-left:auto">${fmt(pl.revenue)}</div></div>
+      <div class="row"><div>銷貨成本</div><div class="right mono" style="margin-left:auto">${fmt(pl.expense)}</div></div>
+      <div class="hr"></div>
+      <div class="row"><strong>本期損益</strong><div class="right mono" style="margin-left:auto">${fmt(pl.profit)}</div></div>
+    </div>`;
+
+    $('#bs').innerHTML = `<div class="stack">
+      <div><strong>資產</strong></div>
+      ${bs.assets.map(a=>`<div class="row"><div>${a.code} ${a.name}</div><div class="right mono" style="margin-left:auto">${fmt(a.balance)}</div></div>`).join('')}
+      <div class="hr"></div>
+      <div><strong>負債</strong></div>
+      ${bs.liab.map(a=>`<div class="row"><div>${a.code} ${a.name}</div><div class="right mono" style="margin-left:auto">${fmt(a.balance)}</div></div>`).join('')}
+      <div class="hr"></div>
+      <div><strong>權益（含本期損益）</strong></div>
+      ${bs.equity.map(a=>`<div class="row"><div>${a.code} ${a.name}</div><div class="right mono" style="margin-left:auto">${fmt(a.balance)}</div></div>`).join('')}
+      <div class="row"><div>本期損益</div><div class="right mono" style="margin-left:auto">${fmt(bs.profit)}</div></div>
+      <div class="hr"></div>
+      <div class="row"><strong>資產合計</strong><div class="right mono" style="margin-left:auto">${fmt(bs.totalAssets)}</div></div>
+      <div class="row"><strong>負債+權益</strong><div class="right mono" style="margin-left:auto">${fmt(bs.totalLiab + bs.equitySum)}</div></div>
+    </div>`;
+
+    $('#iv').innerHTML = `<table><thead><tr><th>料號</th><th>名稱</th><th class="right">數量</th><th class="right">平均成本</th><th class="right">小計</th></tr></thead><tbody>
+      ${state.items.map(i=>`<tr><td class="mono">${i.sku}</td><td>${i.name}</td><td class="right">${i.qty}</td><td class="right">${fmt(i.avgCost)}</td><td class="right">${fmt(i.qty*i.avgCost)}</td></tr>`).join('')}
+      </tbody><tfoot><tr><td colspan="4" class="right">合計</td><td class="right mono">${fmt(sum(state.items, it=>it.qty*it.avgCost))}</td></tr></tfoot></table>`;
+  }
+
+  function renderSettings(root){
+    const s = state.settings;
+    root.innerHTML = `
+      <div class="card"><div class="hd"><h3>系統設定</h3></div><div class="bd stack">
+        <div class="row"><label>公司名稱<br><input id="org" value="${s.orgName}"></label>
+        <label>幣別符號<br><input id="cur" value="${s.currency}"></label>
+        <label>營業稅率(%)<br><input id="tax" type="number" step="0.01" value="${(s.taxRate*100).toFixed(2)}"></label></div>
+        <div class="row"><button class="ok" id="save">保存</button></div>
+        <div class="help">預設稅率 5%（台灣）。可依需要調整。所有金額皆以未稅計算後加稅。</div>
+      </div></div>`;
+    $('#save').onclick = ()=>{
+      s.orgName = $('#org').value.trim()||'我的公司';
+      s.currency = $('#cur').value.trim()||'NT$';
+      s.taxRate = Math.max(0, Number($('#tax').value)/100);
+      persist(); alert('已保存'); render();
+    };
+  }
+
+  // ---------- Modal helper ----------
+  function showModal(content){
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50';
+    overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+
+  // ---------- Export/Import/Reset ----------
+  $('#btnExport').onclick = ()=>{
+    const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `sme-data-${new Date().toISOString().slice(0,10)}.json`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+  $('#fileImport').parentElement.onclick = ()=> $('#fileImport').click();
+  $('#fileImport').onchange = (e)=>{
+    const f = e.target.files[0]; if(!f) return; const r = new FileReader();
+    r.onload = ()=>{ try{ state = JSON.parse(r.result); persist(); alert('匯入成功'); render(); } catch(err){ alert('匯入失敗：'+err.message); } };
+    r.readAsText(f);
+  };
+  $('#btnReset').onclick = ()=>{
+    if(confirm('確定要重設資料嗎？此動作無法復原')){ state = deepClone(DEFAULT); persist(); render(); }
+  };
+
+  // ---------- Init ----------
+  render();
+})();
+</script>
+</body>
+</html>
